@@ -1,0 +1,119 @@
+import { PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
+
+const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#AA336A"];
+
+// 1) Normalize once, use everywhere
+export function normalizeTransactions(transactions) {
+  return (transactions || [])
+    .filter((t) => !t.pending) // don't count pending
+    .map((t) => {
+      const amount = Number(t.amount) || 0;
+
+      // Spending = money out. Refunds/credits will be negative and ignored for "total spent".
+      const spending = amount > 0 ? amount : 0;
+
+      const category =
+        t.personal_finance_category?.primary ||
+        (Array.isArray(t.category) ? t.category[0] : null) ||
+        "Other";
+
+      return { ...t, amount, spending, category };
+    });
+}
+
+export function totalSpent(transactions) {
+  const tx = normalizeTransactions(transactions);
+  return tx.reduce((sum, t) => sum + t.spending, 0);
+}
+
+export function spendingByCategory(transactions) {
+  const tx = normalizeTransactions(transactions);
+
+  const buckets = new Map();
+  for (const t of tx) {
+    if (t.spending <= 0) continue; // spending only
+    buckets.set(t.category, (buckets.get(t.category) || 0) + t.spending);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+// 2) TotalAmount: remove dead code, use one return
+export function TotalAmount({ transactions }) {
+  const normalized = normalizeTransactions(transactions);
+  const spent = totalSpent(transactions);
+
+  const pendingCount = (transactions || []).filter(t => t.pending).length;
+  const rawPositive = (transactions || []).reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0);
+
+  const biggest = [...normalized]
+    .sort((a, b) => b.spending - a.spending)
+    .slice(0, 10);
+
+  return (
+    <div>
+      <h2>Total Spent</h2>
+      <p>${spent.toFixed(2)}</p>
+
+      <details style={{ marginTop: 12 }}>
+        <summary>Debug totals</summary>
+        <p>Transactions received: {transactions?.length || 0}</p>
+        <p>Pending filtered out: {pendingCount}</p>
+        <p>Raw positive sum: ${rawPositive.toFixed(2)}</p>
+        <p>Normalized spend sum: ${spent.toFixed(2)}</p>
+
+        <h4>Top 10 spend items</h4>
+        <ol>
+          {biggest.map(t => (
+            <li key={t.transaction_id}>
+              {t.date} — {t.name} — ${t.spending.toFixed(2)}
+            </li>
+          ))}
+        </ol>
+      </details>
+    </div>
+  );
+
+  
+  /*const spent = totalSpent(transactions);
+
+  return (
+    <div>
+      <h2>Total Spent</h2>
+      <p>${spent.toFixed(2)}</p>
+    </div>
+  );*/
+}
+
+// 3) Pie chart: use spendingByCategory (same logic as total)
+export function SpendingPie({ transactions }) {
+  const data = spendingByCategory(transactions);
+
+  if (!data || data.length === 0) {
+    return <p>No spending data yet</p>;
+  }
+
+  return (
+    <div style={{ display: "flex", justifyContent: "center", marginTop: "50px" }}>
+      <PieChart width={290} height={320}>
+        <Pie
+          data={data}
+          cx="50%"
+          cy="50%"
+          outerRadius={100}
+          dataKey="value"
+          nameKey="name"
+          label
+        >
+          {data.map((_, i) => (
+            <Cell key={i} fill={COLORS[i % COLORS.length]} />
+          ))}
+        </Pie>
+        <Tooltip />
+        <Legend />
+      </PieChart>
+    </div>
+  );
+}
