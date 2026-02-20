@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from .models import BankAccount, Budget, Profile
 from django.contrib.auth.decorators import login_required
 from datetime import datetime, timedelta
+from django.middleware.csrf import get_token
 import json
 from django.contrib.auth import authenticate, login, logout
 from .plaid_client import client
@@ -24,6 +25,7 @@ from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
 
 @csrf_exempt
 @login_required
+# Exchange the public token for a access token which is used to make user-specific Plaid API calls
 def exchange_public_token(request):
     data = json.loads(request.body)
     public_token = data.get("public_token")
@@ -32,7 +34,6 @@ def exchange_public_token(request):
     response = client.item_public_token_exchange(req)
 
     access_token = response.access_token
-    #print("ACCESS TOKEN:", access_token)
 
     profile = request.user.profile
     profile.access_token = response.access_token
@@ -42,6 +43,7 @@ def exchange_public_token(request):
 
 @csrf_exempt
 @login_required
+# Use Plaid's transactions sync endpoint to get incremental updates to the user's transactions since the last sync
 def plaid_transactions_sync(request):
     access_token = request.user.profile.access_token
 
@@ -55,6 +57,8 @@ def plaid_transactions_sync(request):
 
 @csrf_exempt
 @login_required
+# Create a link token for the frontend to initialize Plaid Link
+# Right now this auto sets the username and password for testing purposes
 def create_link_token(request):
     req = LinkTokenCreateRequest(
         user=LinkTokenCreateRequestUser(client_user_id="test-user"),
@@ -73,12 +77,14 @@ def create_link_token(request):
     return JsonResponse(response.to_dict())
 
 @login_required
+# Verifies that the user is authenticated and returns their username
 def whoami(request):
     return JsonResponse({"username": request.user.username})
 
 
 @csrf_exempt
 @login_required
+# Get the user's bank accounts from Plaid, used to show balance
 def plaid_accounts(request):
     access_token = request.user.profile.access_token
 
@@ -89,6 +95,7 @@ def plaid_accounts(request):
 
 @csrf_exempt
 @login_required
+# Trigger a transactions refresh for the user's accounts in Plaid
 def plaid_transactions_refresh(request):
     access_token = request.user.profile.access_token
     if not access_token:
@@ -101,6 +108,7 @@ def plaid_transactions_refresh(request):
 
 @csrf_exempt
 @login_required
+# Get the user's transactions from Plaid using the stored access token, with pagination to handle large transaction sets
 def plaid_transactions(request):
     access_token = request.user.profile.access_token
     if not access_token:
@@ -124,7 +132,6 @@ def plaid_transactions(request):
 
         all_tx.extend(resp.transactions)
 
-        # resp.total_transactions is the total available for that date range
         if len(all_tx) >= resp.total_transactions:
             break
 
@@ -136,6 +143,7 @@ def plaid_transactions(request):
 
 
 @csrf_exempt
+# Regiesters a new user with email, username and password and creates a profile for them. Checks for missing fields and pre-existing email or username
 def register(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
@@ -161,6 +169,7 @@ def register(request):
     return JsonResponse({"message": "User created successfully"})
 
 @csrf_exempt
+# Logs in a user with username and password, checks for missing fields and invalid credentials
 def login_api(request):
     if request.method == "POST":
         data = json.loads(request.body)
@@ -192,12 +201,14 @@ def login_api(request):
 
 @csrf_exempt
 @login_required
+# Logs out the current user
 def logout_api(request):
     logout(request)
     return JsonResponse({'message': 'Logout successful.'})
 
 @csrf_exempt
 @login_required
+# Updates the user's email, checks for missing email and pre-existing email
 def update_email(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
@@ -222,6 +233,7 @@ def update_email(request):
 
 @csrf_exempt
 @login_required
+# Updates the user's username, checks for missing username and pre-existing username
 def update_username(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
@@ -249,6 +261,7 @@ def update_username(request):
 
 @login_required
 @csrf_exempt
+# Updates the user's password, checks if the new password is equal to the old password
 def update_password(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
@@ -269,6 +282,7 @@ def update_password(request):
 
     return JsonResponse({"message": "Password updated successfully"})
 
+# Returns the user's email and username, checks if the user is authenticated
 def user_data(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Authentication required"}, status=401)
@@ -281,6 +295,7 @@ def user_data(request):
 
 @csrf_exempt
 @login_required
+# Creates a new budget with the specified category, amount an month for the user, also checks for missing fields
 def setBudget(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)

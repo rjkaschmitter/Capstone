@@ -2,14 +2,12 @@ import { PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#AA336A"];
 
-// 1) Normalize once, use everywhere
 export function normalizeTransactions(transactions) {
   return (transactions || [])
-    .filter((t) => !t.pending) // don't count pending
+    .filter((t) => !t.pending) 
     .map((t) => {
       const amount = Number(t.amount) || 0;
 
-      // Spending = money out. Refunds/credits will be negative and ignored for "total spent".
       const spending = amount > 0 ? amount : 0;
 
       const category =
@@ -31,7 +29,7 @@ export function spendingByCategory(transactions) {
 
   const buckets = new Map();
   for (const t of tx) {
-    if (t.spending <= 0) continue; // spending only
+    if (t.spending <= 0) continue; 
     buckets.set(t.category, (buckets.get(t.category) || 0) + t.spending);
   }
 
@@ -40,7 +38,6 @@ export function spendingByCategory(transactions) {
     .sort((a, b) => b.value - a.value);
 }
 
-// 2) TotalAmount: remove dead code, use one return
 export function TotalAmount({ transactions }) {
   const normalized = normalizeTransactions(transactions);
   const spent = totalSpent(transactions);
