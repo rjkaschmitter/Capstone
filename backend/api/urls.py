@@ -14,6 +14,9 @@ urlpatterns = [
     path("plaid_accounts/", views.plaid_accounts),
     path("plaid_transactions/", views.plaid_transactions),
     path("whoami/", views.whoami),
-    path("plaid_transactions_sync/", views.plaid_transactions_sync),
+    #path("plaid_transactions_sync/", views.plaid_transactions_sync),
     path("plaid_transactions_refresh/", views.plaid_transactions_refresh),
+    path("transactions/", views.get_transactions),
+    path("transactions/add/", views.addManualTransaction),
+
 ]

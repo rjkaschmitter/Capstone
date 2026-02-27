@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from .models import Transaction
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.models import User
 from .models import BankAccount, Budget, Profile
@@ -22,6 +23,29 @@ from plaid.model.transactions_get_request_options import TransactionsGetRequestO
 from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
 
 
+@csrf_exempt
+@login_required
+def addManualTransaction(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST request required"}, status=400)
+
+    data = json.loads(request.body)
+
+    txn = Transaction.objects.create(
+        user=request.user,
+        name=data.get("name"),
+        amount=data.get("amount"),
+        date=data.get("date"),
+        category=data.get("category"),
+        source="manual"
+    )
+    name = data.get("name")
+    amount = data.get("amount")
+    date = data.get("date")
+    category = data.get("category")
+
+    return JsonResponse({"status": "ok", "id": txn.id})
+
 
 @csrf_exempt
 @login_required
@@ -44,16 +68,23 @@ def exchange_public_token(request):
 @csrf_exempt
 @login_required
 # Use Plaid's transactions sync endpoint to get incremental updates to the user's transactions since the last sync
-def plaid_transactions_sync(request):
-    access_token = request.user.profile.access_token
+def get_transactions(request):
+    txns = Transaction.objects.filter(user=request.user).order_by("-date")
 
-    req = TransactionsSyncRequest(
-        access_token=access_token,
-    )
+    data = [
+        {
+            "id": t.id,
+            "name": t.name,
+            "amount": float(t.amount),
+            "date": str(t.date),
+            "category": t.category,
+            "source": t.source,
+        }
+        for t in txns
+    ]
 
-    response = client.transactions_sync(req)
+    return JsonResponse(data, safe=False)
 
-    return JsonResponse(response.to_dict())
 
 @csrf_exempt
 @login_required
@@ -67,10 +98,10 @@ def create_link_token(request):
         country_codes=[CountryCode("US")],
         language="en",
         webhook="https://webhook.example.com",
-        options=LinkTokenCreateRequestOptions(
-            override_username="user_transactions_dynamic",
-            override_password="pass"
-        )
+        #options=LinkTokenCreateRequestOptions(
+        #    override_username="user_transactions_dynamic",
+        #    override_password="pass"
+        #)
     )
 
     response = client.link_token_create(req)

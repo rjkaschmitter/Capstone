@@ -1,6 +1,12 @@
+
 import { PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
+
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#AA336A"];
+
+
+
+
 
 export function normalizeTransactions(transactions) {
   return (transactions || [])
@@ -53,23 +59,6 @@ export function TotalAmount({ transactions }) {
     <div>
       <h2>Total Spent</h2>
       <p>${spent.toFixed(2)}</p>
-
-      <details style={{ marginTop: 12 }}>
-        <summary>Debug totals</summary>
-        <p>Transactions received: {transactions?.length || 0}</p>
-        <p>Pending filtered out: {pendingCount}</p>
-        <p>Raw positive sum: ${rawPositive.toFixed(2)}</p>
-        <p>Normalized spend sum: ${spent.toFixed(2)}</p>
-
-        <h4>Top 10 spend items</h4>
-        <ol>
-          {biggest.map(t => (
-            <li key={t.transaction_id}>
-              {t.date} — {t.name} — ${t.spending.toFixed(2)}
-            </li>
-          ))}
-        </ol>
-      </details>
     </div>
   );
 

@@ -1,6 +1,6 @@
-import AddBank from "./AddBankComponent.jsx";
+import AddBank from "./AddBankComponent.jsx"
 import Sidebar from "./sidebar.jsx"
-import "./AddBank.css";
+import "./AddBank.css"
 
 export default function AddBankPage() {
     return (

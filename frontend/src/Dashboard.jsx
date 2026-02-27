@@ -4,9 +4,54 @@ import { SpendingPie, TotalAmount } from "./DashboardComponents";
 import ProgressBar from "./Progressbar.jsx";
 import "./Dashboard.css";
 
+
+
+
 export default function Dashboard() {
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState("");
+  const [category, setCategory] = useState("");
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  async function fetchTransactions() {
+    const res = await fetch("http://localhost:8000/api/transactions/", {
+      credentials: "include",
+    });
+    const data = await res.json();
+    setTransactions(data);
+  }
+
+
+  async function addTransaction(e) {
+    e.preventDefault();
+
+    const body = {
+      name,
+      amount,
+      date,
+      category,
+    };
+
+    const res = await fetch("http://localhost:8000/api/transactions/add/", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+    console.log("Added:", data);
+
+    fetchTransactions();
+
+    setName("");
+    setAmount("");
+    setDate("");
+    setCategory("");
+  }
 
   useEffect(() => {
     fetch("http://localhost:8000/api/plaid_accounts/", {
@@ -15,28 +60,19 @@ export default function Dashboard() {
       .then((res) => res.json())
       .then((data) => setAccounts(data.accounts || []));
 
-    fetch("http://localhost:8000/api/plaid_transactions/", {
+    fetch("http://localhost:8000/api/transactions/", {
       credentials: "include"
     })
       .then((res) => res.json())
-      .then((data) => setTransactions(data.transactions || []));
+      .then((data) => setTransactions(data));
+
+
+
   }, []);
-  async function refreshTransactions() {
-    await fetch("http://localhost:8000/api/plaid_transactions_refresh/", {
-      method: "POST",
-      credentials: "include",
-    });
-
-    const res = await fetch("http://localhost:8000/api/plaid_transactions/", {
-      credentials: "include",
-    });
-    const data = await res.json();
-    setTransactions(data.transactions || []);
-
-    
-  }
-    const totalCurrent = accounts.reduce((sum, a) => sum + (Number(a.balances?.current) || 0), 0);
-    const totalAvailable = accounts.reduce((sum, a) => sum + (Number(a.balances?.available) || 0), 0);
+  const plaidCurrent = accounts.reduce((sum, a) => sum + (Number(a.balances?.current) || 0), 0);
+  const totalAvailable = accounts.reduce((sum, a) => sum + (Number(a.balances?.available) || 0), 0);
+  const totalSpent = transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+  const totalCurrent = plaidCurrent - totalSpent;
 
   return (
     <div className="dashboard-layout">
@@ -51,14 +87,14 @@ export default function Dashboard() {
           <div className="dashboard-card">
             <h2>Account Balances</h2>
             <p>Total Current Balance: ${totalCurrent.toFixed(2)}</p>
-            <p>Total Available Balance: ${totalAvailable.toFixed(2)}</p>
+            <p>Total spending: ${totalSpent.toFixed(2)}</p>
             <TotalAmount transactions={transactions} />
           </div>
 
           <div className="dashboard-card">
             <h2>Budget Overview</h2>
             <SpendingPie transactions={transactions} />
-            <p>Total Spending for the month: $1,700</p>
+            <p>Total Spending: ${totalSpent.toFixed(2)}</p>
           </div>
 
           <div className="dashboard-card">
@@ -73,18 +109,47 @@ export default function Dashboard() {
 
           <div className="dashboard-card">
             <h2>Recent Activity</h2>
+            <form onSubmit={addTransaction} style={{ marginBottom: "20px" }}>
+              <input
+                type="text"
+                placeholder="Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
 
-            <button onClick={refreshTransactions}>
-              Refresh Transactions (Sandbox)
-            </button>
+              <input
+                type="number"
+                placeholder="Amount"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
 
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
+
+              <input
+                type="text"
+                placeholder="Category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                required
+              />
+
+              <button type="submit">Add Transaction</button>
+            </form>
             {transactions.length === 0 ? (
               <p>No transactions yet.</p>
             ) : (
               <ul>
-                {transactions.slice(0, 10).map((tx) => (
-                  <li key={tx.transaction_id}>
-                    {tx.date}: {tx.name} — ${Number(tx.amount).toFixed(2)}
+                {transactions.slice(0, 10).map((t) => (
+                  <li key={t.id}>
+                    {t.date}: {t.name} — ${Number(t.amount).toFixed(2)}
                   </li>
                 ))}
               </ul>
