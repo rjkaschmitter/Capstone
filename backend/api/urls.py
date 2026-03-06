@@ -18,5 +18,7 @@ urlpatterns = [
     path("plaid_transactions_refresh/", views.plaid_transactions_refresh),
     path("transactions/", views.get_transactions),
     path("transactions/add/", views.addManualTransaction),
+    path("dashboard/", views.dashboard),
+   
 
 ]

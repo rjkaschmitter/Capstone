@@ -1,13 +1,7 @@
 
 import { PieChart, Pie, Cell, Tooltip, Legend } from "recharts";
 
-
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#AA336A"];
-
-
-
-
-
 export function normalizeTransactions(transactions) {
   return (transactions || [])
     .filter((t) => !t.pending) 
@@ -74,28 +68,14 @@ export function TotalAmount({ transactions }) {
 }
 
 // 3) Pie chart: use spendingByCategory (same logic as total)
-export function SpendingPie({ transactions }) {
-  const data = spendingByCategory(transactions);
-
-  if (!data || data.length === 0) {
-    return <p>No spending data yet</p>;
-  }
+export function SpendingPieAgg({ data }) {
+  if (!data || data.length === 0) return <p>No spending data yet</p>;
 
   return (
     <div style={{ display: "flex", justifyContent: "center", marginTop: "50px" }}>
       <PieChart width={290} height={320}>
-        <Pie
-          data={data}
-          cx="50%"
-          cy="50%"
-          outerRadius={100}
-          dataKey="value"
-          nameKey="name"
-          label
-        >
-          {data.map((_, i) => (
-            <Cell key={i} fill={COLORS[i % COLORS.length]} />
-          ))}
+        <Pie data={data} cx="50%" cy="50%" outerRadius={100} dataKey="value" nameKey="name" label>
+          {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
         </Pie>
         <Tooltip />
         <Legend />

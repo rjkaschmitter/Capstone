@@ -25,6 +25,8 @@ class BankAccount(models.Model):
 
 class Budget(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    category = models.CharField(max_length=100)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    month = models.DateField()  
+    category = models.CharField(max_length=255)
+    monthly_limit = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        unique_together = ("user", "category")

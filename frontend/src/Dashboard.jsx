@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./sidebar.jsx";
-import { SpendingPie, TotalAmount } from "./DashboardComponents";
+import { SpendingPieAgg, TotalAmount } from "./DashboardComponents";
 import ProgressBar from "./Progressbar.jsx";
 import "./Dashboard.css";
+
+
 
 
 
@@ -14,6 +16,19 @@ export default function Dashboard() {
   const [category, setCategory] = useState("");
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
+
+  async function fetchDashboard(y = year, m = month) {
+    const res = await fetch(`http://localhost:8000/api/dashboard/?year=${y}&month=${m}`, {
+      credentials: "include",
+    });
+    const data = await res.json();
+    setDash(data);
+  }
+
+  const [dash, setDash] = useState(null);
   async function fetchTransactions() {
     const res = await fetch("http://localhost:8000/api/transactions/", {
       credentials: "include",
@@ -25,6 +40,7 @@ export default function Dashboard() {
 
   async function addTransaction(e) {
     e.preventDefault();
+    
 
     const body = {
       name,
@@ -45,7 +61,10 @@ export default function Dashboard() {
     const data = await res.json();
     console.log("Added:", data);
 
-    fetchTransactions();
+    
+    await fetchTransactions();
+    await fetchDashboard();
+
 
     setName("");
     setAmount("");
@@ -60,19 +79,24 @@ export default function Dashboard() {
       .then((res) => res.json())
       .then((data) => setAccounts(data.accounts || []));
 
-    fetch("http://localhost:8000/api/transactions/", {
-      credentials: "include"
-    })
-      .then((res) => res.json())
-      .then((data) => setTransactions(data));
-
-
-
+    fetchTransactions();
+    fetchDashboard();
   }, []);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, [year, month]);
+
   const plaidCurrent = accounts.reduce((sum, a) => sum + (Number(a.balances?.current) || 0), 0);
   const totalAvailable = accounts.reduce((sum, a) => sum + (Number(a.balances?.available) || 0), 0);
-  const totalSpent = transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+  const totalSpent = dash ? Number(dash.total_spent) : 0;
+  const byCategory = dash ? dash.by_category : [];
+  const remaining = dash ? dash.remaining_by_category : [];
   const totalCurrent = plaidCurrent - totalSpent;
+  const topProgress = (remaining || [])
+    .filter(r => r.budget > 0)
+    .sort((a, b) => (b.percent_used ?? 0) - (a.percent_used ?? 0))
+    .slice(0, 3);
 
   return (
     <div className="dashboard-layout">
@@ -93,18 +117,26 @@ export default function Dashboard() {
 
           <div className="dashboard-card">
             <h2>Budget Overview</h2>
-            <SpendingPie transactions={transactions} />
+            <SpendingPieAgg data={byCategory} />
             <p>Total Spending: ${totalSpent.toFixed(2)}</p>
           </div>
 
           <div className="dashboard-card">
             <h2>Progress For the Month</h2>
-            <p>Entertainment:</p>
-            <ProgressBar completed={75} />
-            <p>Food:</p>
-            <ProgressBar completed={50} />
-            <p>Transportation:</p>
-            <ProgressBar completed={30} />
+            {!dash ? (
+              <p>Loading…</p>
+            ) : topProgress.length === 0 ? (
+              <p>No budgets set yet.</p>
+            ) : (
+              topProgress.map(r => (
+                <div key={r.category} style={{ marginBottom: 12 }}>
+                  <p>
+                    {r.category}: ${Number(r.remaining).toFixed(2)} left
+                  </p>
+                  <ProgressBar completed={Math.min(100, Math.max(0, Number(r.percent_used || 0)))} />
+                </div>
+              ))
+            )}
           </div>
 
           <div className="dashboard-card">

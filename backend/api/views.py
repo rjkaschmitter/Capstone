@@ -21,7 +21,77 @@ from plaid.model.country_code import CountryCode
 from plaid.model.transactions_get_request import TransactionsGetRequest
 from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
 from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
+from decimal import Decimal
+from datetime import datetime
 
+
+def total_spent_month(user, year: int, month: int) -> Decimal:
+    start, end = month_bounds(year, month)
+    return (Transaction.objects
+            .filter(user=user, date__gte=start, date__lt=end)
+            .aggregate(total=Coalesce(Sum("amount"), Decimal("0.00")))["total"])
+
+def spending_by_category_month(user, year: int, month: int):
+    start, end = month_bounds(year, month)
+    qs = (Transaction.objects
+          .filter(user=user, date__gte=start, date__lt=end)
+          .values("category")
+          .annotate(value=Coalesce(Sum("amount"), Decimal("0.00")))
+          .order_by("-value"))
+    return [{"name": r["category"], "value": float(r["value"])} for r in qs]
+
+
+def month_bounds(year, month):
+    start = datetime(year, month, 1)
+    if month == 12:
+        end = datetime(year + 1, 1, 1)
+    else:
+        end = datetime(year, month + 1, 1)
+    return start, end
+
+
+def remaining_by_category_month(user, year: int, month: int):
+    start, end = month_bounds(year, month)
+
+    spent_rows = (Transaction.objects
+                  .filter(user=user, date__gte=start, date__lt=end)
+                  .values("category")
+                  .annotate(spent=Coalesce(Sum("amount"), Decimal("0.00"))))
+
+    spent = {r["category"]: r["spent"] for r in spent_rows}
+    budgets = {b.category: b.monthly_limit for b in Budget.objects.filter(user=user)}
+
+    cats = set(spent.keys()) | set(budgets.keys())
+    rows = []
+    for c in sorted(cats):
+        b = budgets.get(c, Decimal("0.00"))
+        s = spent.get(c, Decimal("0.00"))
+        rows.append({
+            "category": c,
+            "budget": float(b),
+            "spent": float(s),
+            "remaining": float(b - s),
+            "percent_used": (float(s / b * 100) if b and b != 0 else None),
+        })
+
+    rows.sort(key=lambda r: r["remaining"])
+    return rows
+
+
+@csrf_exempt
+@login_required
+def dashboard(request):
+    year = int(request.GET.get("year", datetime.now().year))
+    month = int(request.GET.get("month", datetime.now().month))
+
+    return JsonResponse({
+        "year": year,
+        "month": month,
+        "total_spent": float(total_spent_month(request.user, year, month)),
+        "by_category": spending_by_category_month(request.user, year, month),
+    })
 
 @csrf_exempt
 @login_required
