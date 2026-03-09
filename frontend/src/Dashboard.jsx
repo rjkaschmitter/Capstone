@@ -4,11 +4,6 @@ import { SpendingPieAgg, TotalAmount } from "./DashboardComponents";
 import ProgressBar from "./Progressbar.jsx";
 import "./Dashboard.css";
 
-
-
-
-
-
 export default function Dashboard() {
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
@@ -18,7 +13,7 @@ export default function Dashboard() {
   const [transactions, setTransactions] = useState([]);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
+  const [month, setMonth] = useState(now.getMonth() + 1);
 
   async function fetchDashboard(y = year, m = month) {
     const res = await fetch(`http://localhost:8000/api/dashboard/?year=${y}&month=${m}`, {
@@ -40,7 +35,7 @@ export default function Dashboard() {
 
   async function addTransaction(e) {
     e.preventDefault();
-    
+
 
     const body = {
       name,
@@ -61,7 +56,7 @@ export default function Dashboard() {
     const data = await res.json();
     console.log("Added:", data);
 
-    
+
     await fetchTransactions();
     await fetchDashboard();
 
@@ -125,17 +120,26 @@ export default function Dashboard() {
             <h2>Progress For the Month</h2>
             {!dash ? (
               <p>Loading…</p>
-            ) : topProgress.length === 0 ? (
+            ) : (remaining || []).filter(r => Number(r.budget) > 0).length === 0 ? (
               <p>No budgets set yet.</p>
             ) : (
-              topProgress.map(r => (
-                <div key={r.category} style={{ marginBottom: 12 }}>
-                  <p>
-                    {r.category}: ${Number(r.remaining).toFixed(2)} left
-                  </p>
-                  <ProgressBar completed={Math.min(100, Math.max(0, Number(r.percent_used || 0)))} />
-                </div>
-              ))
+              (remaining || [])
+                .filter(r => Number(r.budget) > 0)
+                .sort((a, b) => (b.percent_used ?? 0) - (a.percent_used ?? 0)) // most-used first
+                .map(r => {
+                  const pct = Math.min(100, Math.max(0, Number(r.percent_used ?? 0)));
+                  return (
+                    <div key={r.category} style={{ marginBottom: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>{r.category}</span>
+                        <span>
+                          ${Number(r.remaining).toFixed(2)} left ({pct.toFixed(0)}%)
+                        </span>
+                      </div>
+                      <ProgressBar completed={pct} />
+                    </div>
+                  );
+                })
             )}
           </div>
 

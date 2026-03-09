@@ -25,6 +25,15 @@ from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from decimal import Decimal
 from datetime import datetime
+from datetime import date
+
+
+def get_budgets(request):
+    month = date.today().replace(day=1)
+    qs = Budget.objects.filter(user=request.user, month=month).values(
+        "id", "category", "monthly_limit", "month"
+    )
+    return JsonResponse(list(qs), safe=False)
 
 
 def total_spent_month(user, year: int, month: int) -> Decimal:
@@ -61,7 +70,7 @@ def remaining_by_category_month(user, year: int, month: int):
                   .annotate(spent=Coalesce(Sum("amount"), Decimal("0.00"))))
 
     spent = {r["category"]: r["spent"] for r in spent_rows}
-    budgets = {b.category: b.monthly_limit for b in Budget.objects.filter(user=user)}
+    budgets = {b.category: b.monthly_limit for b in Budget.objects.filter(user=user, month=date(year, month, 1))}
 
     cats = set(spent.keys()) | set(budgets.keys())
     rows = []
@@ -85,12 +94,14 @@ def remaining_by_category_month(user, year: int, month: int):
 def dashboard(request):
     year = int(request.GET.get("year", datetime.now().year))
     month = int(request.GET.get("month", datetime.now().month))
+    month_start = date(year, month, 1)
 
     return JsonResponse({
         "year": year,
         "month": month,
         "total_spent": float(total_spent_month(request.user, year, month)),
         "by_category": spending_by_category_month(request.user, year, month),
+        "remaining_by_category": remaining_by_category_month(request.user, year, month),
     })
 
 @csrf_exempt
@@ -397,21 +408,24 @@ def user_data(request):
 @csrf_exempt
 @login_required
 # Creates a new budget with the specified category, amount an month for the user, also checks for missing fields
+@csrf_exempt
+@login_required
 def setBudget(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
 
-    if not request.user.is_authenticated:
-        return JsonResponse({"error": "Authentication required"}, status=401)
-
     data = json.loads(request.body)
     category = data.get("category")
-    amount = data.get("amount")
     month = data.get("month")
+    monthly_limit = data.get("amount")  # coming from frontend
+    if not category or not month or monthly_limit is None:
+        return JsonResponse({"error": "Missing category, month or amount"}, status=400)
 
-    if not category or not amount or not month:
-        return JsonResponse({"error": "Missing category, amount or month"}, status=400)
-
-    budget = Budget.objects.create(user=request.user, category=category, amount=amount, month=month)
-
+    month = date.today().replace(day=1)
+    Budget.objects.update_or_create(
+        user=request.user,
+        category=category,
+        month=month,
+        defaults={"monthly_limit": monthly_limit}
+    )
     return JsonResponse({"message": "Budget set successfully"})

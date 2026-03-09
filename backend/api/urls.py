@@ -19,6 +19,8 @@ urlpatterns = [
     path("transactions/", views.get_transactions),
     path("transactions/add/", views.addManualTransaction),
     path("dashboard/", views.dashboard),
+    path("budget/", views.setBudget),
+    path("budgets/", views.get_budgets),
    
 
 ]
