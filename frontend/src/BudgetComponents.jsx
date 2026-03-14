@@ -27,7 +27,7 @@ export default function Budget() {
       body: JSON.stringify(body),
     });
 
-    // If login redirects, this will likely not be JSON
+
     const text = await res.text();
     if (!res.ok) {
       setError(text);
@@ -68,13 +68,7 @@ export default function Budget() {
           required
         />
 
-        <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-            <option key={m} value={m}>
-              Month {m}
-            </option>
-          ))}
-        </select>
+    
 
         <button type="submit">Save Budget</button>
       </form>

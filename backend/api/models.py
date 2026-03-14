@@ -26,8 +26,9 @@ class BankAccount(models.Model):
 class Budget(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     category = models.CharField(max_length=255)
-    month = models.DateField()  # Store the first day of the month for simplicity
+    month = models.DateField()
     monthly_limit = models.DecimalField(max_digits=10, decimal_places=2)
+    sent_email = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("user", "category")

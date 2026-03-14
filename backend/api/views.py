@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.db import transaction
 from .models import Transaction
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.models import User
@@ -26,7 +27,59 @@ from django.db.models.functions import Coalesce
 from decimal import Decimal
 from datetime import datetime
 from datetime import date
+from django.core.mail import send_mail
+from django.conf import settings
 
+BUDGET_TRESHOLD = Decimal("0.75")
+
+@csrf_exempt
+@login_required
+def delete_all_budgets_and_transactions(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST request required"}, status=405)
+    
+    data = json.loads(request.body)
+    if data.get("confirm") is not True:
+        return JsonResponse({"error": "Confirmation required"}, status=400)
+
+    with transaction.atomic():
+        tx_deleted, _ = Transaction.objects.filter(user=request.user).delete()
+        budgets_deleted, _ = Budget.objects.filter(user=request.user).delete()
+
+        return JsonResponse({"status": "ok", "transactions_deleted": tx_deleted, "budgets_deleted": budgets_deleted})
+    
+def check_budget_thresholds(user, category, txn_date):
+    month_start = txn_date.replace(day=1)
+    budget = Budget.objects.filter(user=user, category=category, month=month_start).first()
+    if not budget:
+        return
+    limit_amt = budget.monthly_limit
+    if not limit_amt or limit_amt <= 0:
+        return
+    
+    start, end = month_bounds(txn_date.year, txn_date.month)
+    spent = (Transaction.objects.filter(user=user, category=category, date__gte=start, date__lt=end).aggregate(total=Coalesce(Sum("amount"), Decimal("0.00")))["total"])
+    percent_spent = spent / limit_amt
+    if percent_spent >= BUDGET_TRESHOLD and not budget.sent_email:
+        if user.email:
+            send_email(
+                subject=f"Budget alert for {category}",
+                message=f"You have spent {percent_spent:.0%} of your budget for {category} this month.",
+                recipient_list=[user.email]
+            ),
+            
+            budget.sent_email = True
+            budget.save(update_fields=["sent_email"])
+            
+
+def send_email(subject, message, recipient_list):
+    send_mail(
+        subject,
+        message,
+        settings.EMAIL_HOST_USER,
+        recipient_list,
+        fail_silently=False,
+    )
 
 def get_budgets(request):
     month = date.today().replace(day=1)
@@ -111,18 +164,24 @@ def addManualTransaction(request):
         return JsonResponse({"error": "POST request required"}, status=400)
 
     data = json.loads(request.body)
-
+    raw_date = data.get("date")
+    try:
+        txn_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except ValueError:
+        return JsonResponse({"error": "Invalid date format, should be YYYY-MM-DD"}, status=400)
+    
     txn = Transaction.objects.create(
         user=request.user,
         name=data.get("name"),
         amount=data.get("amount"),
-        date=data.get("date"),
+        date=txn_date,
         category=data.get("category"),
         source="manual"
     )
+    check_budget_thresholds(request.user, txn.category, txn.date)
     name = data.get("name")
     amount = data.get("amount")
-    date = data.get("date")
+    date = txn_date
     category = data.get("category")
 
     return JsonResponse({"status": "ok", "id": txn.id})

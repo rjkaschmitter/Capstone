@@ -21,6 +21,7 @@ urlpatterns = [
     path("dashboard/", views.dashboard),
     path("budget/", views.setBudget),
     path("budgets/", views.get_budgets),
+    path("reset/", views.delete_all_budgets_and_transactions),
    
 
 ]
