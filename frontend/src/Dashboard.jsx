@@ -265,14 +265,6 @@ export default function Dashboard() {
                 required
               />
 
-              <input
-                type="text"
-                placeholder="Category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                required
-              />
-
               <button type="submit">Add Transaction</button>
             </form>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>

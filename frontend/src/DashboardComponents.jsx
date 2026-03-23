@@ -56,12 +56,13 @@ export function TotalAmount({ transactions, selectedDate }) {
     .sort((a, b) => b.spending - a.spending)
     .slice(0, 10);
 
-  return (
+  /*return (
     <div>
       <h2>Total Spent</h2>
       <p>${spent.toFixed(2)}</p>
     </div>
   );
+  */
 
   
 }

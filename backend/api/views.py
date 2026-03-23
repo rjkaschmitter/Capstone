@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from django.middleware.csrf import get_token
 import json
 from django.contrib.auth import authenticate, login, logout
+from .llm_service import classify_transaction
 from .plaid_client import client
 
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
@@ -170,12 +171,24 @@ def addManualTransaction(request):
     except ValueError:
         return JsonResponse({"error": "Invalid date format, should be YYYY-MM-DD"}, status=400)
     
+    name = data.get("name")
+    amount = data.get("amount")
+    if not name or amount is None:
+        return JsonResponse({"error": "Missing name or amount"}, status=400)
+    
+    try:
+        llm_result = classify_transaction(name)
+        category = llm_result.get("category", "Other")
+    except Exception as e:
+        print("LLM classification failed:", e)
+        category = "Other"
+
     txn = Transaction.objects.create(
         user=request.user,
-        name=data.get("name"),
+        name=name,
         amount=data.get("amount"),
         date=txn_date,
-        category=data.get("category"),
+        category=category,
         source="manual"
     )
     check_budget_thresholds(request.user, txn.category, txn.date)
@@ -238,10 +251,6 @@ def create_link_token(request):
         country_codes=[CountryCode("US")],
         language="en",
         webhook="https://webhook.example.com",
-        #options=LinkTokenCreateRequestOptions(
-        #    override_username="user_transactions_dynamic",
-        #    override_password="pass"
-        #)
     )
 
     response = client.link_token_create(req)
