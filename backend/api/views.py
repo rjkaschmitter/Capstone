@@ -1,11 +1,10 @@
 from django.http import JsonResponse
 from django.db import transaction
-from .models import Transaction
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.models import User
-from .models import BankAccount, Budget, Profile
+from .models import Budget, Profile, Transaction
 from django.contrib.auth.decorators import login_required
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from django.middleware.csrf import get_token
 import json
 from django.contrib.auth import authenticate, login, logout
@@ -26,12 +25,10 @@ from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from decimal import Decimal
-from datetime import datetime
-from datetime import date
 from django.core.mail import send_mail
 from django.conf import settings
 
-BUDGET_TRESHOLD = Decimal("0.75")
+BUDGET_THRESHOLD = Decimal("0.75")
 
 @csrf_exempt
 @login_required
@@ -61,7 +58,7 @@ def check_budget_thresholds(user, category, txn_date):
     start, end = month_bounds(txn_date.year, txn_date.month)
     spent = (Transaction.objects.filter(user=user, category=category, date__gte=start, date__lt=end).aggregate(total=Coalesce(Sum("amount"), Decimal("0.00")))["total"])
     percent_spent = spent / limit_amt
-    if percent_spent >= BUDGET_TRESHOLD and not budget.sent_email:
+    if percent_spent >= BUDGET_THRESHOLD and not budget.sent_email:
         if user.email:
             send_email(
                 subject=f"Budget alert for {category}",
@@ -148,7 +145,6 @@ def remaining_by_category_month(user, year: int, month: int):
 def dashboard(request):
     year = int(request.GET.get("year", datetime.now().year))
     month = int(request.GET.get("month", datetime.now().month))
-    month_start = date(year, month, 1)
 
     return JsonResponse({
         "year": year,
@@ -166,18 +162,22 @@ def addManualTransaction(request):
 
     data = json.loads(request.body)
     raw_date = data.get("date")
+    
+    level_choice = int(data.get("level", 2)) 
+
     try:
         txn_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
-    except ValueError:
-        return JsonResponse({"error": "Invalid date format, should be YYYY-MM-DD"}, status=400)
+    except (ValueError, TypeError):
+        return JsonResponse({"error": "Invalid date format"}, status=400)
     
     name = data.get("name")
     amount = data.get("amount")
+    
     if not name or amount is None:
         return JsonResponse({"error": "Missing name or amount"}, status=400)
     
     try:
-        llm_result = classify_transaction(name)
+        llm_result = classify_transaction(name, level=level_choice)
         category = llm_result.get("category", "Other")
     except Exception as e:
         print("LLM classification failed:", e)
@@ -186,18 +186,15 @@ def addManualTransaction(request):
     txn = Transaction.objects.create(
         user=request.user,
         name=name,
-        amount=data.get("amount"),
+        amount=amount,
         date=txn_date,
         category=category,
         source="manual"
     )
+    
     check_budget_thresholds(request.user, txn.category, txn.date)
-    name = data.get("name")
-    amount = data.get("amount")
-    date = txn_date
-    category = data.get("category")
 
-    return JsonResponse({"status": "ok", "id": txn.id})
+    return JsonResponse({"status": "ok", "id": txn.id, "category": category})
 
 
 @csrf_exempt
@@ -209,8 +206,6 @@ def exchange_public_token(request):
 
     req = ItemPublicTokenExchangeRequest(public_token=public_token)
     response = client.item_public_token_exchange(req)
-
-    access_token = response.access_token
 
     profile = request.user.profile
     profile.access_token = response.access_token
@@ -393,9 +388,6 @@ def update_email(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
 
-    if not request.user.is_authenticated:
-        return JsonResponse({"error": "Authentication required"}, status=401)
-
     data = json.loads(request.body)
     new_email = data.get("email")
 
@@ -417,9 +409,6 @@ def update_email(request):
 def update_username(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
-
-    if not request.user.is_authenticated:
-        return JsonResponse({"error": "Authentication required"}, status=401)
 
     data = json.loads(request.body)
     new_username = data.get("username")
@@ -446,9 +435,6 @@ def update_password(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=400)
 
-    if not request.user.is_authenticated:
-        return JsonResponse({"error": "Authentication required"}, status=401)
-
     data = json.loads(request.body)
     new_password = data.get("password")
 
@@ -473,8 +459,6 @@ def user_data(request):
         "username": user.username,
     })
 
-@csrf_exempt
-@login_required
 # Creates a new budget with the specified category, amount an month for the user, also checks for missing fields
 @csrf_exempt
 @login_required
@@ -484,8 +468,7 @@ def setBudget(request):
 
     data = json.loads(request.body)
     category = data.get("category")
-    month = data.get("month")
-    monthly_limit = data.get("amount")  # coming from frontend
+    monthly_limit = data.get("amount")
     if not category or not month or monthly_limit is None:
         return JsonResponse({"error": "Missing category, month or amount"}, status=400)
 

@@ -68,37 +68,32 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    # CORS middleware MUST be at the very top
     'corsheaders.middleware.CorsMiddleware',
 
-    # Django security middleware
     'django.middleware.security.SecurityMiddleware',
 
-    # Session middleware (required for login sessions)
     'django.contrib.sessions.middleware.SessionMiddleware',
 
-    # CSRF middleware (must come AFTER SessionMiddleware)
     'django.middleware.csrf.CsrfViewMiddleware',
 
-    # Common middleware
     'django.middleware.common.CommonMiddleware',
 
-    # Authentication middleware (required for request.user)
     'django.contrib.auth.middleware.AuthenticationMiddleware',
 
-    # Messages, clickjacking, etc.
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    #"http://localhost:3000",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
 
 ]
 
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
+    "http://localhost:5174",
 
 ]
 ROOT_URLCONF = 'backend.urls'

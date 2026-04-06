@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./sidebar.jsx";
+import { Swiper, SwiperSlide } from 'swiper/react';
+import 'swiper/css';
 import { SpendingPieAgg, TotalAmount } from "./DashboardComponents";
 import ProgressBar from "./Progressbar.jsx";
 import "./Dashboard.css";
@@ -8,7 +10,7 @@ export default function Dashboard() {
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
-  const [category, setCategory] = useState("");
+  const [level, setLevel] = useState(2);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const now = new Date();
@@ -17,7 +19,6 @@ export default function Dashboard() {
   const [whatIfEnabled, setWhatIfEnabled] = useState(false);
   const [whatIfAmount, setWhatIfAmount] = useState("");
   const [whatIfCategory, setWhatIfCategory] = useState("");
-  const [transSort, setTransSort] = useState("date_desc");
   const [transLimit, setTransLimit] = useState(10);
 
   const whatIfAmountNum = Number(whatIfAmount) || 0;
@@ -49,7 +50,7 @@ export default function Dashboard() {
       name,
       amount,
       date,
-      category,
+      level,
     };
 
     const res = await fetch("http://localhost:8000/api/transactions/add/", {
@@ -72,7 +73,6 @@ export default function Dashboard() {
     setName("");
     setAmount("");
     setDate("");
-    setCategory("");
   }
 
   useEffect(() => {
@@ -83,14 +83,13 @@ export default function Dashboard() {
       .then((data) => setAccounts(data.accounts || []));
 
     fetchTransactions();
-    fetchDashboard();
   }, []);
 
   useEffect(() => {
     fetchDashboard();
   }, [year, month]);
 
-  const monthlyTransactions = (transactions || []).filter((t) => {
+  const monthlyTransactions = transactions.filter((t) => {
     if (!t.date) return false;
     const d = new Date(t.date);
     return d.getFullYear() === year && (d.getMonth() + 1) === month;
@@ -99,21 +98,16 @@ export default function Dashboard() {
   const sortedTransactions = [...monthlyTransactions].sort((a, b) => {
     const ad = new Date(a.date).getTime();
     const bd = new Date(b.date).getTime();
-    return transSort === "date_asc" ? ad - bd : bd - ad;
+    return bd - ad;
   });
 
   const displayedTransactions = sortedTransactions.slice(0, transLimit);
 
   const plaidCurrent = accounts.reduce((sum, a) => sum + (Number(a.balances?.current) || 0), 0);
-  const totalAvailable = accounts.reduce((sum, a) => sum + (Number(a.balances?.available) || 0), 0);
   const totalSpent = dash ? Number(dash.total_spent) : 0;
   const byCategory = dash ? dash.by_category : [];
   const remaining = dash ? dash.remaining_by_category : [];
   const totalCurrent = plaidCurrent - totalSpent;
-  const topProgress = (remaining || [])
-    .filter(r => r.budget > 0)
-    .sort((a, b) => (b.percent_used ?? 0) - (a.percent_used ?? 0))
-    .slice(0, 3);
 
   const categoryOptions = Array.from(new Set([...(byCategory || []).map((c) => c.category), ...(remaining || []).map((r) => r.category)])).filter(Boolean);
 
@@ -185,7 +179,7 @@ export default function Dashboard() {
       return;
     }
   };
-  
+
 
   return (
     <div className="dashboard-layout">
@@ -240,7 +234,7 @@ export default function Dashboard() {
 
           <div className="dashboard-card">
             <h2>Recent Activity</h2>
-            
+
             <form onSubmit={addTransaction} style={{ marginBottom: "20px" }}>
               <input
                 type="text"
@@ -264,6 +258,15 @@ export default function Dashboard() {
                 onChange={(e) => setDate(e.target.value)}
                 required
               />
+
+              <select value={level} onChange={(e) => setLevel(Number(e.target.value))}>
+                <option value={1}>Level 1 (broad)</option>
+                <option value={2}>Level 2 (medium)</option>
+                <option value={3}>Level 3 (detailed)</option>
+                <option value={4}>Level 4 (most detailed)</option>
+              </select>
+
+
 
               <button type="submit">Add Transaction</button>
             </form>
@@ -295,7 +298,7 @@ export default function Dashboard() {
                   <option value={12}>December</option>
                 </select>
               </label>
-               <button type="button" onClick={deleteAllBudgetsAndTransactions}>
+              <button type="button" onClick={deleteAllBudgetsAndTransactions}>
                 Delete All Budgets and Transactions
               </button>
             </div>

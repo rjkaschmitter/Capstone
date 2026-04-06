@@ -1,88 +1,41 @@
-import requests
+import os
+from groq import Groq
+from dotenv import load_dotenv
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "llama3"
+load_dotenv()
+client = Groq(api_key=os.getenv("GROQ_KEY"))
 
-ALLOWED_CATEGORIES = {
-    "Food",
-    "Groceries",
-    "Transportation",
-    "Entertainment",
-    "Bills",
-    "Shopping",
-    "Other",
+GRANULARITY_MAP = {
+    1: ["Food", "Entertainment", "Transportation", "Bills", "Shopping", "Other"],
+    2: ["Dining", "Groceries", "Transportation", "Housing", "Entertainment", "Shopping", "Health", "Other"],
+    3: ["Groceries", "Shopping","Dining", "Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other"],
+    4: ["Groceries", "Shopping", "Fast Food", "Dine in", "Drinks","Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other" ]
 }
 
-def classify_transaction(name: str):
-    prompt = f"""
-You classify financial transactions into one category.
-
-Allowed categories:
-Food
-Groceries
-Transportation
-Entertainment
-Bills
-Shopping
-Other
-
-Rules:
-- Return exactly one category from the allowed list.
-- Do not explain.
-- Do not use punctuation.
-- Do not return JSON.
-- If unsure, return Other.
-
-Examples:
-Starbucks -> Food
-McDonald's -> Food
-Trader Joe's -> Groceries
-Safeway -> Groceries
-Uber -> Transportation
-Netflix -> Entertainment
-Verizon -> Bills
-Target -> Shopping
-Unknown merchant -> Other
-
-Transaction: {name}
-Category:
-"""
+def classify_transaction(name, level=2):
+    categories = GRANULARITY_MAP.get(level, GRANULARITY_MAP[2])
+    
+    system_prompt = (
+        f"You are a financial assistant. Categorize the merchant into EXACTLY ONE "
+        f"of these categories: {categories}. Return only the category name."
+    )
 
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={
-                "model": MODEL_NAME,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.1
-                }
-            },
-            timeout=30
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": name}
+            ],
+            temperature=0, 
+            max_tokens=20
         )
-
-        response.raise_for_status()
-        raw = response.json().get("response", "").strip()
-
-        print("RAW MODEL TEXT:", repr(raw))
-
-        if not raw:
-            return {"category": "Other"}
-
-        first_line = raw.splitlines()[0].strip()
-
-        cleaned = first_line.replace('"', "").replace("'", "").strip()
-
-        if cleaned not in ALLOWED_CATEGORIES:
-            for category in ALLOWED_CATEGORIES:
-                if category.lower() in cleaned.lower():
-                    return {"category": category}
-            return {"category": "Other"}
-
-        return {"category": cleaned}
-
+        category = completion.choices[0].message.content.strip()
+        
+        if category not in categories:
+            category = "Other"
+            
+        return {"category": category}
     except Exception as e:
-        print("Ollama classify_transaction error:", e)
+        print(f"LLM Error: {e}")
         return {"category": "Other"}
-    
