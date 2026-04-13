@@ -468,6 +468,7 @@ def setBudget(request):
 
     data = json.loads(request.body)
     category = data.get("category")
+    month = data.get("month")
     monthly_limit = data.get("amount")
     if not category or not month or monthly_limit is None:
         return JsonResponse({"error": "Missing category, month or amount"}, status=400)

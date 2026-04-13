@@ -46,16 +46,6 @@ export function TotalAmount({ transactions, selectedDate }) {
     return date.getMonth() === month && date.getFullYear() === year;
   });
   
-  const normalized = normalizeTransactions(monthTxns);
-  const spent = totalSpent(monthTxns);
-
-  const pendingCount = monthTxns.filter(t => t.pending).length;
-  const rawPositive = monthTxns.reduce((s, t) => s + (Number(t.amount) > 0 ? Number(t.amount) : 0), 0);
-
-  const biggest = [...normalized]
-    .sort((a, b) => b.spending - a.spending)
-    .slice(0, 10);
-  
 }
 
 export function SpendingPieAgg({ data }) {

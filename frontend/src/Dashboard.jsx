@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./sidebar.jsx";
-import { Swiper, SwiperSlide } from 'swiper/react';
-import 'swiper/css';
-import { SpendingPieAgg, TotalAmount } from "./DashboardComponents";
+import { SpendingPieAgg } from "./DashboardComponents";
 import ProgressBar from "./Progressbar.jsx";
 import "./Dashboard.css";
 
@@ -20,6 +18,8 @@ export default function Dashboard() {
   const [whatIfAmount, setWhatIfAmount] = useState("");
   const [whatIfCategory, setWhatIfCategory] = useState("");
   const [transLimit, setTransLimit] = useState(10);
+  const [report, setReport] = useState(null);
+  const [showReport, setShowReport] = useState(false);
 
   const whatIfAmountNum = Number(whatIfAmount) || 0;
 
@@ -41,6 +41,62 @@ export default function Dashboard() {
     setTransactions(data);
   }
 
+  function handleGenerateReport() {
+    const categories = (scenarioRemaining || [])
+      .filter((r) => Number(r.budget) > 0)
+      .map((r) => {
+        const budget = Number(r.budget || 0);
+        const remainingAmt = Number(r.remaining || 0);
+        const usedPct = Number(r.percent_used || 0);
+        const spentAmt = budget - remainingAmt;
+
+        return {
+          category: r.category,
+          budget,
+          spent: spentAmt,
+          remaining: remainingAmt,
+          percentUsed: usedPct,
+          overBudget: remainingAmt < 0,
+        };
+      });
+
+    const overBudgetCategories = categories.filter((c) => c.overBudget);
+    const largestCategory =
+      [...(scenarioByCategory || [])]
+        .map((c) => ({
+          category: c.category ?? c.name,
+          amount: Number(c.amount ?? c.value ?? 0),
+        }))
+        .sort((a, b) => b.amount - a.amount)[0] || null;
+
+    const totalBudget = categories.reduce((sum, c) => sum + c.budget, 0);
+    const totalRemaining = categories.reduce((sum, c) => sum + c.remaining, 0);
+
+    const reportData = {
+      generatedAt: new Date().toLocaleString(),
+      month,
+      year,
+      totalCurrent: scenarioTotalCurrent,
+      totalSpent: scenarioTotalSpent,
+      totalBudget,
+      totalRemaining,
+      overBudgetCount: overBudgetCategories.length,
+      overBudgetCategories,
+      largestCategory,
+      categories,
+      includesWhatIf: whatIfEnabled && !!whatIfCategory && whatIfAmountNum > 0,
+      whatIfDetails:
+        whatIfEnabled && !!whatIfCategory && whatIfAmountNum > 0
+          ? {
+            category: whatIfCategory,
+            amount: whatIfAmountNum,
+          }
+          : null,
+    };
+
+    setReport(reportData);
+    setShowReport(true);
+  }
 
   async function addTransaction(e) {
     e.preventDefault();
@@ -107,7 +163,6 @@ export default function Dashboard() {
   const totalSpent = dash ? Number(dash.total_spent) : 0;
   const byCategory = dash ? dash.by_category : [];
   const remaining = dash ? dash.remaining_by_category : [];
-  const totalCurrent = plaidCurrent - totalSpent;
 
   const categoryOptions = Array.from(new Set([...(byCategory || []).map((c) => c.category), ...(remaining || []).map((r) => r.category)])).filter(Boolean);
 
@@ -118,11 +173,8 @@ export default function Dashboard() {
 
     const normalized = (byCategory || [])
       .map((c) => {
-        const cat =
-          c.category ?? c.name ?? c.label ?? c.key ?? c.type;
-        const amt = Number(
-          c.amount ?? c.total ?? c.spent ?? c.value ?? c.sum ?? 0
-        );
+        const cat = c.category; 
+        const amt = Number(c.amount) || 0;
         return cat ? { category: String(cat), amount: amt } : null;
       })
       .filter(Boolean);
@@ -170,8 +222,7 @@ export default function Dashboard() {
       if (!res.ok) {
         throw new Error(`Error ${res.status}: ${text}`);
       }
-      const data = JSON.parse(text);
-      console.log("Reset successful:", data);
+      console.log("Reset successful:");
     }
     catch (err) {
       console.error("Error resetting data:", err);
@@ -195,7 +246,6 @@ export default function Dashboard() {
             <h2>Account Balances</h2>
             <p>Total Current Balance: ${scenarioTotalCurrent.toFixed(2)}</p>
             <p>Total spending: ${scenarioTotalSpent.toFixed(2)}</p>
-            <TotalAmount transactions={transactions} selectedDate={now} />
           </div>
 
           <div className="dashboard-card">
@@ -222,7 +272,7 @@ export default function Dashboard() {
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span>{r.category}</span>
                         <span>
-                          ${Number(r.remaining).toFixed(2)} left ({pct.toFixed(0)}%)
+                          ${Number(r.remaining).toFixed(2)} left ({pct.toFixed(1)}%)
                         </span>
                       </div>
                       <ProgressBar completed={pct} />
@@ -266,7 +316,9 @@ export default function Dashboard() {
                 <option value={4}>Level 4 (most detailed)</option>
               </select>
 
-
+              <button type="button" onClick={handleGenerateReport}>
+                Generate Report
+              </button>
 
               <button type="submit">Add Transaction</button>
             </form>
@@ -365,6 +417,39 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+        {showReport && report && (
+          <div className="dashboard-card" style={{ marginTop: 20 }}>
+            <h2>Monthly Snapshot Report</h2>
+            <p><strong>Month:</strong> {report.month}/{report.year}</p>
+            <p><strong>Total Current Balance:</strong> ${report.totalCurrent.toFixed(2)}</p>
+            <p><strong>Total Spent:</strong> ${report.totalSpent.toFixed(2)}</p>
+            <p><strong>Total Budget:</strong> ${report.totalBudget.toFixed(2)}</p>
+            <p><strong>Total Remaining:</strong> ${report.totalRemaining.toFixed(2)}</p>
+
+            {report.largestCategory && (
+              <p>
+                <strong>Largest Spending Category:</strong> {report.largestCategory.category}
+                {" "} (${report.largestCategory.amount.toFixed(2)})
+              </p>
+            )}
+
+            <p><strong>Categories Over Budget:</strong> {report.overBudgetCount}</p>
+            <p><strong>Category Breakdown:</strong></p>
+            <ul>
+              {report.categories.map((c) => (
+                <li key={c.category}>
+                  {c.category}: Spent ${c.spent.toFixed(2)} | Budget ${c.budget.toFixed(2)} |
+                  Remaining ${c.remaining.toFixed(2)} | Used {c.percentUsed.toFixed(1)}%
+                  {c.overBudget ? " | Over Budget" : ""}
+                </li>
+              ))}
+            </ul>
+
+            <button type="button" onClick={() => setShowReport(false)}>
+              Close Report
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
