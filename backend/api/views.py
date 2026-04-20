@@ -2,7 +2,7 @@ from django.http import JsonResponse
 from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.models import User
-from .models import Budget, Profile, Transaction
+from .models import Budget, Profile, Transaction, BankAccount
 from django.contrib.auth.decorators import login_required
 from datetime import datetime, timedelta, date
 from django.middleware.csrf import get_token
@@ -11,14 +11,18 @@ from django.contrib.auth import authenticate, login, logout
 from .llm_service import classify_transaction
 from .plaid_client import client
 
+import time
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 
+from plaid.model.sandbox_item_fire_webhook_request import SandboxItemFireWebhookRequest
+from plaid.model.webhook_type import WebhookType
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.products import Products
 from plaid.model.country_code import CountryCode
 
+from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
 from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
 from plaid.model.transactions_refresh_request import TransactionsRefreshRequest
@@ -163,7 +167,7 @@ def addManualTransaction(request):
     data = json.loads(request.body)
     raw_date = data.get("date")
     
-    level_choice = int(data.get("level", 2)) 
+    level_choice = int(data.get("level", 1)) 
 
     try:
         txn_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
@@ -209,6 +213,7 @@ def exchange_public_token(request):
 
     profile = request.user.profile
     profile.access_token = response.access_token
+    profile.plaid_item_id = response.item_id
     profile.save()
 
     return JsonResponse({"status": "ok"})
@@ -233,6 +238,24 @@ def get_transactions(request):
 
     return JsonResponse(data, safe=False)
 
+@csrf_exempt
+@login_required
+def trigger_sandbox_spending(request):
+    data = json.loads(request.body)
+    new_level = data.get("level", 1)
+
+    profile = request.user.profile
+    profile.llm_level = new_level
+    profile.save()
+    access_token = request.user.profile.access_token
+
+    req = SandboxItemFireWebhookRequest(
+        access_token=access_token,
+        webhook_type=WebhookType('TRANSACTIONS'),
+        webhook_code='DEFAULT_UPDATE'
+    )
+    client.sandbox_item_fire_webhook(req)
+    return JsonResponse({"status": "sandbox webhook triggered"})
 
 @csrf_exempt
 @login_required
@@ -240,12 +263,12 @@ def get_transactions(request):
 # Right now this auto sets the username and password for testing purposes
 def create_link_token(request):
     req = LinkTokenCreateRequest(
-        user=LinkTokenCreateRequestUser(client_user_id="test-user"),
+        user=LinkTokenCreateRequestUser(client_user_id=str(request.user.id)),
         client_name="SmartMoney",
         products=[Products("transactions")],
         country_codes=[CountryCode("US")],
         language="en",
-        webhook="https://webhook.example.com",
+        webhook="https://tinsel-proposal-immortal.ngrok-free.dev/api/plaid_webhook/",
     )
 
     response = client.link_token_create(req)
@@ -275,11 +298,79 @@ def plaid_transactions_refresh(request):
     access_token = request.user.profile.access_token
     if not access_token:
         return JsonResponse({"error": "no access token"}, status=400)
+    
 
     req = TransactionsRefreshRequest(access_token=access_token)
     client.transactions_refresh(req)
 
     return JsonResponse({"status": "refresh triggered"})
+
+def sync_plaid_transactions_for_user(user):
+    budget_categories = list(
+        Budget.objects.filter(user=user).values_list("category", flat=True)
+    )
+    access_token = user.profile.access_token
+    sync_args = {"access_token": access_token}
+    if user.profile.plaid_cursor:
+        sync_args["cursor"] = user.profile.plaid_cursor
+    req = TransactionsSyncRequest(**sync_args)
+
+    user_level = getattr(user.profile, "llm_level", 1)
+    try:
+        response = client.transactions_sync(req)
+        new_transactions = sorted(response.added, key=lambda x: x.date)
+        user.profile.transactions_cursor = response.next_cursor
+        user.profile.save()
+
+        today = date.today()
+        for t in new_transactions[:20]:
+            try:
+                
+                llm_result = classify_transaction(t.name, level=user_level)
+                smart_category = llm_result.get("category", "Other")
+            
+                if smart_category in budget_categories:
+                    if t.date.month == today.month and t.date.year == today.year:
+                        save_date = t.date
+                    else:  
+                        save_date = today
+
+                    Transaction.objects.update_or_create(
+                        transaction_id=t.transaction_id,
+                        defaults={
+                            "user": user,
+                            "name": t.name,
+                            "amount": Decimal(str(t.amount)),
+                            "date": save_date,
+                            "category": smart_category,
+                            "source": "plaid",
+                        }
+                    )
+                    print(f"Added transaction {t.name} with category {smart_category} and amount {t.amount}")
+                else:
+                    print(f"Skipped {t.name}, category {smart_category} not in user's budgets")
+                time.sleep(3)
+            
+            except Exception as e:
+                print(f"Error on {t.name}: {e}, {t.category}, {t.amount}")
+
+        
+    except Exception as e:
+        print(f"Error syncing transactions for user {user.username}: {e}")
+
+@csrf_exempt
+def plaid_webhook(request):
+    data = json.loads(request.body)
+    webhook_code = data.get("webhook_code")
+
+    if webhook_code == 'DEFAULT_UPDATE' or webhook_code == "SYNC_UPDATES_AVAILABLE":
+        item_id = data.get("item_id")
+        profile = Profile.objects.filter(plaid_item_id=item_id).first()
+
+        if profile:
+            sync_plaid_transactions_for_user(profile.user)
+    
+    return JsonResponse({"status": "received"})
 
 @csrf_exempt
 @login_required

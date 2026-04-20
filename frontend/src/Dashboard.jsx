@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./sidebar.jsx";
-import { SpendingPieAgg } from "./DashboardComponents";
+import { SpendingPieAgg, SpendingBarChart, SpendingLineChart } from "./DashboardComponents";
 import ProgressBar from "./Progressbar.jsx";
 import "./Dashboard.css";
 
@@ -20,6 +20,12 @@ export default function Dashboard() {
   const [transLimit, setTransLimit] = useState(10);
   const [report, setReport] = useState(null);
   const [showReport, setShowReport] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [goalName, setGoalName] = useState("");
+  const [goalAmount, setGoalAmount] = useState("");
+  const [goalCategory, setGoalCategory] = useState("");
+  const [amountSaved, setAmountSaved] = useState("");
+  const [goalPlan, setGoalPlan] = useState(null);
 
   const whatIfAmountNum = Number(whatIfAmount) || 0;
 
@@ -30,6 +36,32 @@ export default function Dashboard() {
     });
     const data = await res.json();
     setDash(data);
+  }
+
+  async function handleSimulateSpending() {
+    try {
+      const res = await fetch("http://localhost:8000/api/simulate-spending/", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level: level }),
+      });
+      if (res.ok) {
+        const pollInterval = setInterval(() => {
+          console.log("Polling for new transactions...");
+          setRefreshKey(prev => prev + 1);
+        }, 5000);
+
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          console.log("Polling stopped.");
+        }, 65000);
+        alert("Simulation triggered! Using level " + level + ". New transactions will appear in a few seconds.");
+      }
+    }
+    catch (err) {
+      console.error("Simulation failed:", err);
+    }
   }
 
   const [dash, setDash] = useState(null);
@@ -98,10 +130,97 @@ export default function Dashboard() {
     setShowReport(true);
   }
 
+  function handleSavingsAdvice() {
+    const target = Number(goalAmount) || 0;
+    const saved = Number(amountSaved) || 0;
+
+    if (!goalName || !goalCategory || target <= 0) {
+      alert("Please enter an item, category, and valid amount.");
+      return;
+    }
+
+    if (saved < 0 || saved > target) {
+      alert("Saved amount must be between 0 and the item cost.");
+      return;
+    }
+
+    const amountStillNeeded = Math.max(0, target - saved);
+
+    const selectedSpentData = (scenarioByCategory || []).find(
+      (c) => String(c.name ?? "").trim() === String(goalCategory).trim()
+    );
+
+    const currentSpent = Number(selectedSpentData?.value ?? 0);
+
+    const selectedBudgetData = (scenarioRemaining || []).find(
+      (r) => r.category === goalCategory
+    );
+
+    console.log("goalCategory:", goalCategory);
+    console.log("scenarioByCategory:", scenarioByCategory);
+    const categoryBudget = Number(selectedBudgetData?.budget || 0);
+
+    const monthlyAvailable = Math.max(0, categoryBudget - currentSpent);
+
+    const monthsNeeded =
+      monthlyAvailable > 0
+        ? Math.ceil(amountStillNeeded / monthlyAvailable)
+        : null;
+
+    const reductionSuggestions = (scenarioRemaining || [])
+      .filter((r) => Number(r.budget) > 0 && r.category !== goalCategory)
+      .map((r) => ({
+        category: r.category,
+        budget: Number(r.budget || 0),
+        remaining: Number(r.remaining || 0),
+        percentUsed: Number(r.percent_used || 0),
+      }))
+      .sort((a, b) => {
+        const scoreA = (a.remaining < 0 ? 1000 : 0) + a.percentUsed;
+        const scoreB = (b.remaining < 0 ? 1000 : 0) + b.percentUsed;
+        return scoreB - scoreA;
+      })
+      .slice(0, 3);
+
+    const adviceMessages = reductionSuggestions.map((cat) => {
+      if (cat.remaining < 0) {
+        return `${cat.category} is already over budget, so reducing it could improve your savings fastest.`;
+      }
+      if (cat.percentUsed >= 90) {
+        return `${cat.category} is close to its limit, so cutting back here may help you reach your goal sooner.`;
+      }
+      return `${cat.category} is one of your higher-use categories and may be a good place to reduce spending.`;
+    });
+
+    let predictionMessage = "";
+
+    if (amountStillNeeded <= 0) {
+      predictionMessage = `You already have enough saved for "${goalName}".`;
+    } else if (monthlyAvailable > 0) {
+      predictionMessage = `At your current ${goalCategory} spending rate, it may take about ${monthsNeeded} month(s) to afford "${goalName}".`;
+    } else {
+      predictionMessage = `At your current ${goalCategory} spending rate, there is no room left in this month’s budget to estimate a savings timeline.`;
+    }
+
+    setGoalPlan({
+      name: goalName,
+      amount: target,
+      amountSaved: saved,
+      category: goalCategory,
+      amountStillNeeded,
+      currentSpent,
+      categoryBudget,
+      monthlyAvailable,
+      monthsNeeded,
+      reductionSuggestions,
+      adviceMessages,
+      predictionMessage,
+    });
+  }
+
   async function addTransaction(e) {
     e.preventDefault();
-
-
+    
     const body = {
       name,
       amount,
@@ -132,24 +251,42 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/plaid_accounts/", {
-      credentials: "include"
-    })
-      .then((res) => res.json())
-      .then((data) => setAccounts(data.accounts || []));
+    async function updateAllData() {
+      const accRes = await fetch("http://localhost:8000/api/plaid_accounts/", { credentials: "include" });
+      const accData = await accRes.json();
+      setAccounts(accData.accounts || []);
 
-    fetchTransactions();
-  }, []);
+      await fetchTransactions();
 
-  useEffect(() => {
-    fetchDashboard();
-  }, [year, month]);
+      await fetchDashboard(year, month);
+    }
+
+    updateAllData();
+  }, [year, month, refreshKey]);
 
   const monthlyTransactions = transactions.filter((t) => {
     if (!t.date) return false;
     const d = new Date(t.date);
     return d.getFullYear() === year && (d.getMonth() + 1) === month;
   });
+
+  const spendingTrendData = (() => {
+    const dailyTotals = new Map();
+
+    monthlyTransactions.forEach((t) => {
+      if (!t.date) return;
+      const day = new Date(t.date).getDate();
+      const amount = Number(t.amount) || 0;
+      dailyTotals.set(day, (dailyTotals.get(day) || 0) + amount);
+    });
+
+    return Array.from(dailyTotals.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([day, amount]) => ({
+        day: `Day ${day}`,
+        amount,
+      }));
+  })();
 
   const sortedTransactions = [...monthlyTransactions].sort((a, b) => {
     const ad = new Date(a.date).getTime();
@@ -173,7 +310,7 @@ export default function Dashboard() {
 
     const normalized = (byCategory || [])
       .map((c) => {
-        const cat = c.category; 
+        const cat = c.category;
         const amt = Number(c.amount) || 0;
         return cat ? { category: String(cat), amount: amt } : null;
       })
@@ -248,10 +385,25 @@ export default function Dashboard() {
             <p>Total spending: ${scenarioTotalSpent.toFixed(2)}</p>
           </div>
 
-          <div className="dashboard-card">
-            <h2>Budget Overview</h2>
-            <SpendingPieAgg data={scenarioByCategory} />
-            <p>Total Spending: ${scenarioTotalSpent.toFixed(2)}</p>
+          <div className="dashboard-card wide-card">
+            <h2>Spending Distribution</h2>
+            <div className="chart-box">
+              <SpendingPieAgg data={scenarioByCategory} />
+            </div>
+          </div>
+
+          <div className="dashboard-card wide-card">
+            <h2>Volume by Category</h2>
+            <div className="chart-box">
+              <SpendingBarChart data={scenarioByCategory} />
+            </div>
+          </div>
+
+          <div className="dashboard-card wide-card">
+            <h2>Spending Trend</h2>
+            <div className="chart-box">
+              <SpendingLineChart data={spendingTrendData} />
+            </div>
           </div>
 
           <div className="dashboard-card">
@@ -284,7 +436,12 @@ export default function Dashboard() {
 
           <div className="dashboard-card">
             <h2>Recent Activity</h2>
-
+            <button
+              type="button"
+              onClick={handleSimulateSpending}
+            >
+              Simulate New Spending
+            </button>
             <form onSubmit={addTransaction} style={{ marginBottom: "20px" }}>
               <input
                 type="text"
@@ -367,6 +524,7 @@ export default function Dashboard() {
                 ))}
               </ul>
             )}
+
           </div>
           <div className="dashboard-card">
             <h2>What-If: Hypothetical Expense</h2>
@@ -414,6 +572,71 @@ export default function Dashboard() {
               >
                 Clear
               </button>
+            </div>
+            <div className="dashboard-card">
+              <h2>Savings Advice & Prediction</h2>
+
+              <div style={{ display: "grid", gap: 10 }}>
+                <input
+                  type="text"
+                  placeholder="Item name"
+                  value={goalName}
+                  onChange={(e) => setGoalName(e.target.value)}
+                />
+
+                <input
+                  type="number"
+                  placeholder="Item cost"
+                  value={goalAmount}
+                  onChange={(e) => setGoalAmount(e.target.value)}
+                  min="0"
+                  step="0.01"
+                />
+
+                <select
+                  value={goalCategory}
+                  onChange={(e) => setGoalCategory(e.target.value)}
+                >
+                  <option value="">Select category</option>
+                  {categoryOptions.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  placeholder="Amount already saved (optional)"
+                  value={amountSaved}
+                  onChange={(e) => setAmountSaved(e.target.value)}
+                  min="0"
+                  step="0.01"
+                />
+
+                <button type="button" onClick={handleSavingsAdvice}>
+                  Get Advice
+                </button>
+              </div>
+
+              {goalPlan && (
+                <div style={{ marginTop: 12 }}>
+                  <p><strong>Prediction:</strong> {goalPlan.predictionMessage}</p>
+                  <p><strong>Amount still needed:</strong> ${goalPlan.amountStillNeeded.toFixed(2)}</p>
+                  <p><strong>Current {goalPlan.category} spending:</strong> ${goalPlan.currentSpent.toFixed(2)}</p>
+                  <p><strong>{goalPlan.category} budget:</strong> ${goalPlan.categoryBudget.toFixed(2)}</p>
+                  <p><strong>Monthly room in category:</strong> ${goalPlan.monthlyAvailable.toFixed(2)}</p>
+
+                  {goalPlan.adviceMessages.length > 0 && (
+                    <>
+                      <p><strong>Categories to consider lowering:</strong></p>
+                      <ul>
+                        {goalPlan.adviceMessages.map((msg, idx) => (
+                          <li key={idx}>{msg}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
