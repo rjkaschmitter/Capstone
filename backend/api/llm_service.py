@@ -8,8 +8,8 @@ client = Groq(api_key=os.getenv("GROQ_KEY"))
 GRANULARITY_MAP = {
     1: ["Food", "Entertainment", "Transportation", "Bills", "Shopping", "Other"],
     2: ["Dining", "Groceries", "Transportation", "Housing", "Entertainment", "Shopping", "Health", "Other"],
-    3: ["Groceries", "Shopping","Dining", "Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other"],
-    4: ["Groceries", "Shopping", "Fast Food", "Dine In", "Drinks", "Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other" ]
+    3: ["Groceries", "Entertainment", "Shopping", "Dining", "Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other"],
+    4: ["Groceries", "Entertainment", "Shopping", "Fast Food", "Dine in", "Drinks","Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other" ]
 }
 
 def classify_transaction(name, level=2):

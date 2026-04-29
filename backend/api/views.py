@@ -83,12 +83,19 @@ def send_email(subject, message, recipient_list):
         fail_silently=False,
     )
 
+@login_required
 def get_budgets(request):
     month = date.today().replace(day=1)
     qs = Budget.objects.filter(user=request.user, month=month).values(
         "id", "category", "monthly_limit", "month"
     )
-    return JsonResponse(list(qs), safe=False)
+
+    level = getattr(request.user.profile, "llm_level", 1)
+
+    return JsonResponse({
+        "specificity_level": level,
+        "budgets": list(qs),
+    })
 
 
 def total_spent_month(user, year: int, month: int) -> Decimal:
@@ -104,7 +111,7 @@ def spending_by_category_month(user, year: int, month: int):
           .values("category")
           .annotate(value=Coalesce(Sum("amount"), Decimal("0.00")))
           .order_by("-value"))
-    return [{"name": r["category"], "value": float(r["value"])} for r in qs]
+    return [{"category": r["category"], "amount": float(r["value"])} for r in qs]
 
 
 def month_bounds(year, month):
@@ -149,10 +156,12 @@ def remaining_by_category_month(user, year: int, month: int):
 def dashboard(request):
     year = int(request.GET.get("year", datetime.now().year))
     month = int(request.GET.get("month", datetime.now().month))
+    level = getattr(request.user.profile, "llm_level", 1)
 
     return JsonResponse({
         "year": year,
         "month": month,
+        "specificity_level": level,
         "total_spent": float(total_spent_month(request.user, year, month)),
         "by_category": spending_by_category_month(request.user, year, month),
         "remaining_by_category": remaining_by_category_month(request.user, year, month),
@@ -167,7 +176,10 @@ def addManualTransaction(request):
     data = json.loads(request.body)
     raw_date = data.get("date")
     
-    level_choice = int(data.get("level", 1)) 
+    try:
+        level_choice = int(getattr(request.user.profile, "llm_level", 1))
+    except (TypeError, ValueError):
+        level_choice = 1
 
     try:
         txn_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
@@ -241,13 +253,8 @@ def get_transactions(request):
 @csrf_exempt
 @login_required
 def trigger_sandbox_spending(request):
-    data = json.loads(request.body)
-    new_level = data.get("level", 1)
-
     profile = request.user.profile
-    profile.llm_level = new_level
-    profile.save()
-    access_token = request.user.profile.access_token
+    access_token = profile.access_token
 
     req = SandboxItemFireWebhookRequest(
         access_token=access_token,
@@ -255,6 +262,7 @@ def trigger_sandbox_spending(request):
         webhook_code='DEFAULT_UPDATE'
     )
     client.sandbox_item_fire_webhook(req)
+
     return JsonResponse({"status": "sandbox webhook triggered"})
 
 @csrf_exempt
@@ -309,13 +317,19 @@ def sync_plaid_transactions_for_user(user):
     budget_categories = list(
         Budget.objects.filter(user=user).values_list("category", flat=True)
     )
+
+
     access_token = user.profile.access_token
     sync_args = {"access_token": access_token}
+
     if user.profile.plaid_cursor:
         sync_args["cursor"] = user.profile.plaid_cursor
+
     req = TransactionsSyncRequest(**sync_args)
 
     user_level = getattr(user.profile, "llm_level", 1)
+    print("USER LEVEL USED FOR PLAID SYNC:", user_level)
+
     try:
         response = client.transactions_sync(req)
         new_transactions = sorted(response.added, key=lambda x: x.date)
@@ -325,7 +339,8 @@ def sync_plaid_transactions_for_user(user):
         today = date.today()
         for t in new_transactions[:20]:
             try:
-                
+                print("CLASSIFYING:", t.name, "WITH LEVEL:", user_level)
+
                 llm_result = classify_transaction(t.name, level=user_level)
                 smart_category = llm_result.get("category", "Other")
             
@@ -335,6 +350,14 @@ def sync_plaid_transactions_for_user(user):
                     else:  
                         save_date = today
 
+                    print(
+                        "PLAID TX:",
+                        t.transaction_id,
+                        t.name,
+                        t.amount,
+                        t.date,
+                        smart_category
+                    )
                     Transaction.objects.update_or_create(
                         transaction_id=t.transaction_id,
                         defaults={
@@ -350,6 +373,10 @@ def sync_plaid_transactions_for_user(user):
                 else:
                     print(f"Skipped {t.name}, category {smart_category} not in user's budgets")
                 time.sleep(3)
+                airline_txns = Transaction.objects.filter(user=user, category="Airlines").values(
+                "transaction_id", "name", "amount", "date", "category"
+                )
+                print("AIRLINE TXNS IN DB:", list(airline_txns))
             
             except Exception as e:
                 print(f"Error on {t.name}: {e}, {t.category}, {t.amount}")
@@ -554,21 +581,76 @@ def user_data(request):
 @csrf_exempt
 @login_required
 def setBudget(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST request required"}, status=400)
+    if request.method == "GET":
+        month = date.today().replace(day=1)
+        qs = Budget.objects.filter(user=request.user, month=month).values(
+            "id", "category", "monthly_limit", "month"
+        )
 
-    data = json.loads(request.body)
-    category = data.get("category")
-    month = data.get("month")
-    monthly_limit = data.get("amount")
-    if not category or not month or monthly_limit is None:
-        return JsonResponse({"error": "Missing category, month or amount"}, status=400)
+        level = getattr(request.user.profile, "llm_level", 1)
 
-    month = date.today().replace(day=1)
-    Budget.objects.update_or_create(
-        user=request.user,
-        category=category,
-        month=month,
-        defaults={"monthly_limit": monthly_limit}
-    )
-    return JsonResponse({"message": "Budget set successfully"})
+        return JsonResponse({
+            "specificity_level": level,
+            "budgets": list(qs),
+        })
+
+    if request.method == "POST":
+        data = json.loads(request.body)
+
+        category = data.get("category")
+        month = data.get("month")
+        monthly_limit = data.get("amount")
+        specificity_level = data.get("specificity_level")
+
+        print("SET BUDGET: incoming data =", data)
+
+        if not category or not month or monthly_limit is None or specificity_level is None:
+            return JsonResponse(
+                {"error": "Missing category, month, amount, or specificity_level"},
+                status=400
+            )
+
+        try:
+            specificity_level = int(specificity_level)
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "Invalid specificity_level"}, status=400)
+
+        CATEGORY_OPTIONS = {
+            1: ["Food", "Entertainment", "Transportation", "Bills", "Shopping", "Other"],
+            2: ["Dining", "Groceries", "Transportation", "Housing", "Entertainment", "Shopping", "Health", "Other"],
+            3: ["Groceries", "Entertainment", "Shopping", "Dining", "Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other"],
+            4: ["Groceries", "Entertainment", "Shopping", "Fast Food", "Dine In", "Drinks", "Fuel", "Rent", "Health", "Streaming", "Utilities", "Subscription", "Ride Share", "Airlines", "Other"],
+        }
+
+        valid_categories = CATEGORY_OPTIONS.get(specificity_level, [])
+        if category not in valid_categories:
+            return JsonResponse(
+                {"error": "Category does not belong to selected specificity level"},
+                status=400
+            )
+
+        month = date.today().replace(day=1)
+
+        Budget.objects.update_or_create(
+            user=request.user,
+            category=category,
+            month=month,
+            defaults={"monthly_limit": monthly_limit}
+        )
+
+        profile = request.user.profile
+
+        print("PROFILE level BEFORE save =", profile.llm_level)
+
+        profile.llm_level = specificity_level
+        profile.save(update_fields=["llm_level"])
+        profile.refresh_from_db()
+
+        print("PROFILE level AFTER save =", profile.llm_level)
+
+        return JsonResponse({
+            "message": "Budget set successfully",
+            "specificity_level": specificity_level
+        })
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)

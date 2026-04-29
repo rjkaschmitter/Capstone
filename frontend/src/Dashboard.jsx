@@ -43,9 +43,8 @@ export default function Dashboard() {
       const res = await fetch("http://localhost:8000/api/simulate-spending/", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ level: level }),
       });
+
       if (res.ok) {
         const pollInterval = setInterval(() => {
           console.log("Polling for new transactions...");
@@ -56,10 +55,10 @@ export default function Dashboard() {
           clearInterval(pollInterval);
           console.log("Polling stopped.");
         }, 65000);
-        alert("Simulation triggered! Using level " + level + ". New transactions will appear in a few seconds.");
+
+        alert("Simulation triggered! New transactions will appear in a few seconds.");
       }
-    }
-    catch (err) {
+    } catch (err) {
       console.error("Simulation failed:", err);
     }
   }
@@ -220,12 +219,11 @@ export default function Dashboard() {
 
   async function addTransaction(e) {
     e.preventDefault();
-    
+
     const body = {
       name,
       amount,
       date,
-      level,
     };
 
     const res = await fetch("http://localhost:8000/api/transactions/add/", {
@@ -298,7 +296,14 @@ export default function Dashboard() {
 
   const plaidCurrent = accounts.reduce((sum, a) => sum + (Number(a.balances?.current) || 0), 0);
   const totalSpent = dash ? Number(dash.total_spent) : 0;
-  const byCategory = dash ? dash.by_category : [];
+  const byCategory = dash
+    ? (dash.by_category || []).map((c) => ({
+      category: c.category ?? c.name,
+      amount: Number(c.amount ?? c.value ?? 0),
+      name: c.name ?? c.category,
+      value: Number(c.value ?? c.amount ?? 0),
+    }))
+    : [];
   const remaining = dash ? dash.remaining_by_category : [];
 
   const categoryOptions = Array.from(new Set([...(byCategory || []).map((c) => c.category), ...(remaining || []).map((r) => r.category)])).filter(Boolean);
@@ -436,49 +441,11 @@ export default function Dashboard() {
 
           <div className="dashboard-card">
             <h2>Recent Activity</h2>
-            <button
-              type="button"
-              onClick={handleSimulateSpending}
-            >
-              Simulate New Spending
+
+            <button type="button" onClick={handleGenerateReport}>
+              Generate Report
             </button>
-            <form onSubmit={addTransaction} style={{ marginBottom: "20px" }}>
-              <input
-                type="text"
-                placeholder="Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
 
-              <input
-                type="number"
-                placeholder="Amount"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-              />
-
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                required
-              />
-
-              <select value={level} onChange={(e) => setLevel(Number(e.target.value))}>
-                <option value={1}>Level 1 (broad)</option>
-                <option value={2}>Level 2 (medium)</option>
-                <option value={3}>Level 3 (detailed)</option>
-                <option value={4}>Level 4 (most detailed)</option>
-              </select>
-
-              <button type="button" onClick={handleGenerateReport}>
-                Generate Report
-              </button>
-
-              <button type="submit">Add Transaction</button>
-            </form>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <span style={{ fontSize: 12, opacity: 0.8 }}>Year</span>
@@ -507,9 +474,6 @@ export default function Dashboard() {
                   <option value={12}>December</option>
                 </select>
               </label>
-              <button type="button" onClick={deleteAllBudgetsAndTransactions}>
-                Delete All Budgets and Transactions
-              </button>
             </div>
 
             {displayedTransactions.length === 0 ? (
@@ -573,71 +537,72 @@ export default function Dashboard() {
                 Clear
               </button>
             </div>
-            <div className="dashboard-card">
-              <h2>Savings Advice & Prediction</h2>
 
-              <div style={{ display: "grid", gap: 10 }}>
-                <input
-                  type="text"
-                  placeholder="Item name"
-                  value={goalName}
-                  onChange={(e) => setGoalName(e.target.value)}
-                />
+          </div>
+          <div className="dashboard-card">
+            <h2>Savings Advice & Prediction</h2>
 
-                <input
-                  type="number"
-                  placeholder="Item cost"
-                  value={goalAmount}
-                  onChange={(e) => setGoalAmount(e.target.value)}
-                  min="0"
-                  step="0.01"
-                />
+            <div style={{ display: "grid", gap: 10 }}>
+              <input
+                type="text"
+                placeholder="Item name"
+                value={goalName}
+                onChange={(e) => setGoalName(e.target.value)}
+              />
 
-                <select
-                  value={goalCategory}
-                  onChange={(e) => setGoalCategory(e.target.value)}
-                >
-                  <option value="">Select category</option>
-                  {categoryOptions.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+              <input
+                type="number"
+                placeholder="Item cost"
+                value={goalAmount}
+                onChange={(e) => setGoalAmount(e.target.value)}
+                min="0"
+                step="0.01"
+              />
 
-                <input
-                  type="number"
-                  placeholder="Amount already saved (optional)"
-                  value={amountSaved}
-                  onChange={(e) => setAmountSaved(e.target.value)}
-                  min="0"
-                  step="0.01"
-                />
+              <select
+                value={goalCategory}
+                onChange={(e) => setGoalCategory(e.target.value)}
+              >
+                <option value="">Select category</option>
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
 
-                <button type="button" onClick={handleSavingsAdvice}>
-                  Get Advice
-                </button>
-              </div>
+              <input
+                type="number"
+                placeholder="Amount already saved (optional)"
+                value={amountSaved}
+                onChange={(e) => setAmountSaved(e.target.value)}
+                min="0"
+                step="0.01"
+              />
 
-              {goalPlan && (
-                <div style={{ marginTop: 12 }}>
-                  <p><strong>Prediction:</strong> {goalPlan.predictionMessage}</p>
-                  <p><strong>Amount still needed:</strong> ${goalPlan.amountStillNeeded.toFixed(2)}</p>
-                  <p><strong>Current {goalPlan.category} spending:</strong> ${goalPlan.currentSpent.toFixed(2)}</p>
-                  <p><strong>{goalPlan.category} budget:</strong> ${goalPlan.categoryBudget.toFixed(2)}</p>
-                  <p><strong>Monthly room in category:</strong> ${goalPlan.monthlyAvailable.toFixed(2)}</p>
-
-                  {goalPlan.adviceMessages.length > 0 && (
-                    <>
-                      <p><strong>Categories to consider lowering:</strong></p>
-                      <ul>
-                        {goalPlan.adviceMessages.map((msg, idx) => (
-                          <li key={idx}>{msg}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </div>
-              )}
+              <button type="button" onClick={handleSavingsAdvice}>
+                Get Advice
+              </button>
             </div>
+
+            {goalPlan && (
+              <div style={{ marginTop: 12 }}>
+                <p><strong>Prediction:</strong> {goalPlan.predictionMessage}</p>
+                <p><strong>Amount still needed:</strong> ${goalPlan.amountStillNeeded.toFixed(2)}</p>
+                <p><strong>Current {goalPlan.category} spending:</strong> ${goalPlan.currentSpent.toFixed(2)}</p>
+                <p><strong>{goalPlan.category} budget:</strong> ${goalPlan.categoryBudget.toFixed(2)}</p>
+                <p><strong>Monthly room in category:</strong> ${goalPlan.monthlyAvailable.toFixed(2)}</p>
+
+                {goalPlan.adviceMessages.length > 0 && (
+                  <>
+                    <p><strong>Categories to consider lowering:</strong></p>
+                    <ul>
+                      {goalPlan.adviceMessages.map((msg, idx) => (
+                        <li key={idx}>{msg}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
         {showReport && report && (
