@@ -23,6 +23,8 @@ urlpatterns = [
     path("budget/", views.setBudget),
     path("budgets/", views.get_budgets),
     path("reset/", views.delete_all_budgets_and_transactions),
+    path("budgets/adjust/", views.adjust_budget),
+    path("budget/delete/", views.delete_budget),
    
 
 ]

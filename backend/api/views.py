@@ -36,6 +36,40 @@ BUDGET_THRESHOLD = Decimal("0.75")
 
 @csrf_exempt
 @login_required
+def delete_budget(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    data = json.loads(request.body)
+
+    category = data.get("category")
+    month = data.get("month")
+    year = data.get("year")
+
+    if not category or not month or not year:
+        return JsonResponse({"error": "Missing category, month, or year"}, status=400)
+
+    try:
+        month_num = int(month)
+        year = int(year)
+        month_date = date(year, month_num, 1)
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Invalid month or year"}, status=400)
+
+    deleted_count, _ = Budget.objects.filter(
+        user=request.user,
+        category=category,
+        month=month_date,
+        year=year
+    ).delete()
+
+    if deleted_count == 0:
+        return JsonResponse({"error": "Budget not found"}, status=404)
+
+    return JsonResponse({"message": "Budget deleted successfully"})
+
+@csrf_exempt
+@login_required
 def delete_all_budgets_and_transactions(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST request required"}, status=405)
@@ -85,7 +119,6 @@ def send_email(subject, message, recipient_list):
 
 @login_required
 def get_budgets(request):
-    month = date.today().replace(day=1)
     qs = Budget.objects.filter(user=request.user, month=month).values(
         "id", "category", "monthly_limit", "month"
     )
@@ -582,9 +615,16 @@ def user_data(request):
 @login_required
 def setBudget(request):
     if request.method == "GET":
-        month = date.today().replace(day=1)
-        qs = Budget.objects.filter(user=request.user, month=month).values(
-            "id", "category", "monthly_limit", "month"
+        month_num = int(request.GET.get("month", date.today().month))
+        year = int(request.GET.get("year", date.today().year))
+        month_date = date(year, month_num, 1)
+
+        qs = Budget.objects.filter(
+            user=request.user,
+            month=month_date,
+            year=year
+        ).values(
+            "id", "category", "monthly_limit", "month", "year"
         )
 
         level = getattr(request.user.profile, "llm_level", 1)
@@ -599,21 +639,26 @@ def setBudget(request):
 
         category = data.get("category")
         month = data.get("month")
+        year = data.get("year")
         monthly_limit = data.get("amount")
         specificity_level = data.get("specificity_level")
 
         print("SET BUDGET: incoming data =", data)
 
-        if not category or not month or monthly_limit is None or specificity_level is None:
+        if not category or not month or not year or monthly_limit is None or specificity_level is None:
             return JsonResponse(
                 {"error": "Missing category, month, amount, or specificity_level"},
                 status=400
             )
 
         try:
+            month_num = int(month)
+            year = int(year)
             specificity_level = int(specificity_level)
         except (TypeError, ValueError):
-            return JsonResponse({"error": "Invalid specificity_level"}, status=400)
+            return JsonResponse({"error": "Invalid month, year, or specificity_level"}, status=400)
+
+        month_date = date(year, month_num, 1)
 
         CATEGORY_OPTIONS = {
             1: ["Food", "Entertainment", "Transportation", "Bills", "Shopping", "Other"],
@@ -628,13 +673,12 @@ def setBudget(request):
                 {"error": "Category does not belong to selected specificity level"},
                 status=400
             )
-
-        month = date.today().replace(day=1)
-
+        
         Budget.objects.update_or_create(
             user=request.user,
             category=category,
-            month=month,
+            month=month_date,
+            year=year,
             defaults={"monthly_limit": monthly_limit}
         )
 
@@ -654,3 +698,44 @@ def setBudget(request):
         })
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+@login_required
+def adjust_budget(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    data = json.loads(request.body)
+
+    category = data.get("category")
+    adjustment = data.get("adjustment")
+    month = data.get("month")
+    year = data.get("year")
+
+    if not category or adjustment is None or not month or not year:
+        return JsonResponse({"error": "Missing data"}, status=400)
+
+    try:
+        month = int(month)
+        year = int(year)
+        adjustment = float(adjustment)
+    except:
+        return JsonResponse({"error": "Invalid values"}, status=400)
+
+    month_date = date(year, month, 1)
+
+    budget = Budget.objects.filter(
+        user=request.user,
+        category=category,
+        month=month_date,
+        year=year
+    ).first()
+
+    if not budget:
+        return JsonResponse({"error": "Budget not found"}, status=404)
+
+    budget.monthly_limit = max(0, budget.monthly_limit + Decimal(adjustment))
+    budget.save()
+
+    return JsonResponse({"message": "Budget updated"})

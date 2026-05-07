@@ -89,7 +89,52 @@ export const SpendingBarChart = ({ data }) => {
   );
 };
 
-export function SpendingPieAgg({ data }) {
+function PieCategoryTooltip({ active, payload, transactions }) {
+  if (!active || !payload || !payload.length) return null;
+
+  const slice = payload[0].payload;
+  const hoveredCategory = String(slice.category ?? slice.name ?? "").trim();
+
+  const matchingTransactions = (transactions || []).filter(
+    (t) =>
+      String(t.category ?? "").trim().toLowerCase() ===
+      hoveredCategory.toLowerCase()
+  );
+
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #ccc",
+        borderRadius: 8,
+        padding: 12,
+        maxWidth: 320,
+      }}
+    >
+      <div style={{ fontWeight: "bold", marginBottom: 6 }}>
+        {hoveredCategory}
+      </div>
+
+      <div style={{ marginBottom: 8 }}>
+        Total: ${Number(slice.value ?? 0).toFixed(2)}
+      </div>
+
+      {matchingTransactions.length === 0 ? (
+        <div>No transactions in this category.</div>
+      ) : (
+        <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 160, overflowY: "auto" }}>
+          {matchingTransactions.map((t) => (
+            <li key={t.id}>
+              {t.date}: {t.name} — ${Number(t.amount).toFixed(2)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function SpendingPieAgg({ data, transactions }) {
   if (!data || data.length === 0) return <p>No spending data yet</p>;
 
   return (
@@ -98,7 +143,7 @@ export function SpendingPieAgg({ data }) {
         <Pie data={data} cx="50%" cy="50%" outerRadius={85} dataKey="value" nameKey="name" label>
           {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
         </Pie>
-        <Tooltip />
+        <Tooltip content={<PieCategoryTooltip transactions={transactions} />} />
         <Legend />
       </PieChart>
     </div>

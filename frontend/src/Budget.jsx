@@ -2,6 +2,8 @@ import Budget from "./BudgetComponents.jsx";
 import Sidebar from "./sidebar.jsx";
 import "./Budget.css";
 
+
+
 export default function BudgetPage() {
     return (
         <div className="budget-layout">
